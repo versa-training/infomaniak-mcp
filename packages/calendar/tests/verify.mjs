@@ -1,0 +1,595 @@
+import { test, describe } from "node:test";
+import assert from "node:assert";
+import { CalendarClient } from "../dist/calendar-client.js";
+
+describe("CalendarClient instantiation", () => {
+    test("creates a client with token", () => {
+        const client = new CalendarClient("test-token");
+        assert.ok(client);
+    });
+
+    test("exposes all expected methods", () => {
+        const client = new CalendarClient("test-token");
+        const methods = [
+            "getCalendars", "getDefaultCalendar", "getUserProfile",
+            "listEvents", "getEvent", "createEvent", "updateEvent", "deleteEvent"
+        ];
+        for (const m of methods) {
+            assert.strictEqual(
+                typeof client[m],
+                "function",
+                `method ${m} should be a function`
+            );
+        }
+    });
+});
+
+describe("CalendarClient.getCalendars", () => {
+    test("calls fetch with correct URL", async () => {
+        let capturedUrl = null;
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async (url) => {
+            capturedUrl = url;
+            return { ok: true, text: async () => JSON.stringify({ result: "success", data: { calendars: [] } }) };
+        };
+
+        const client = new CalendarClient("mock-token");
+        await client.getCalendars();
+
+        assert.ok(capturedUrl, "fetch was called");
+        assert.ok(capturedUrl.includes("/calendar/pim/calendar"), "URL contains calendar endpoint");
+
+        globalThis.fetch = originalFetch;
+    });
+});
+
+describe("CalendarClient.getDefaultCalendar", () => {
+    test("returns first calendar from list", async () => {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async () => ({
+            ok: true,
+            text: async () => JSON.stringify({
+                result: "success",
+                data: { calendars: [{ id: 1, name: "Test Calendar" }] }
+            })
+        });
+
+        const client = new CalendarClient("mock-token");
+        const result = await client.getDefaultCalendar();
+
+        assert.strictEqual(result.id, 1);
+        assert.strictEqual(result.name, "Test Calendar");
+
+        globalThis.fetch = originalFetch;
+    });
+
+    test("returns calendar with default:true even when not first", async () => {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async () => ({
+            ok: true,
+            text: async () => JSON.stringify({
+                result: "success",
+                data: {
+                    calendars: [
+                        { id: 10, name: "Not Default", default: false },
+                        { id: 20, name: "Other Calendar", default: false },
+                        { id: 30, name: "Real Default", default: true },
+                    ]
+                }
+            })
+        });
+
+        const client = new CalendarClient("mock-token");
+        const result = await client.getDefaultCalendar();
+
+        assert.strictEqual(result.id, 30);
+        assert.strictEqual(result.name, "Real Default");
+
+        globalThis.fetch = originalFetch;
+    });
+
+    test("falls back to first calendar when none has default:true", async () => {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async () => ({
+            ok: true,
+            text: async () => JSON.stringify({
+                result: "success",
+                data: {
+                    calendars: [
+                        { id: 10, name: "First", default: false },
+                        { id: 20, name: "Second", default: false },
+                    ]
+                }
+            })
+        });
+
+        const client = new CalendarClient("mock-token");
+        const result = await client.getDefaultCalendar();
+
+        assert.strictEqual(result.id, 10);
+
+        globalThis.fetch = originalFetch;
+    });
+});
+
+describe("CalendarClient.getUserProfile", () => {
+    test("calls correct endpoint", async () => {
+        let capturedUrl = null;
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async (url) => {
+            capturedUrl = url;
+            return { ok: true, text: async () => JSON.stringify({ result: "success", data: {} }) };
+        };
+
+        const client = new CalendarClient("mock-token");
+        await client.getUserProfile();
+
+        assert.ok(capturedUrl, "fetch was called");
+        assert.ok(capturedUrl.includes("/profile"), "URL contains profile endpoint");
+
+        globalThis.fetch = originalFetch;
+    });
+});
+
+describe("CalendarClient.listEvents", () => {
+    test("calls fetch with correct URL and parameters", async () => {
+        let capturedUrl = null;
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async (url) => {
+            capturedUrl = url;
+            if (String(url).includes("/profile")) {
+                return { ok: true, text: async () => JSON.stringify({ result: "success", data: { preferences: { timezone: { name: "Europe/Zurich" } } } }) };
+            }
+            return {
+                ok: true,
+                text: async () => JSON.stringify({ result: "success", data: [] })
+            };
+        };
+
+        const client = new CalendarClient("mock-token");
+        await client.listEvents("2025-01-01 00:00:00", "2025-01-02 00:00:00", "123");
+
+        assert.ok(capturedUrl, "fetch was called");
+        assert.ok(capturedUrl.includes("/calendar/pim/event"), "URL contains event endpoint");
+        assert.ok(capturedUrl.includes("calendar_id=123"), "URL contains calendar_id");
+
+        globalThis.fetch = originalFetch;
+    });
+
+    test("throws on non-ok response", async () => {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async (url) => {
+            if (String(url).includes("/profile")) {
+                return { ok: true, text: async () => JSON.stringify({ result: "success", data: { preferences: { timezone: { name: "Europe/Zurich" } } } }) };
+            }
+            return new Response(JSON.stringify({ result: "error", error: { code: "server_error", description: "boom" } }), { status: 500 });
+        };
+
+        const client = new CalendarClient("mock-token");
+        client.getDefaultCalendar = async () => ({ id: "1" });
+
+        await assert.rejects(
+            async () => client.listEvents("2025-01-01 00:00:00", "2025-01-02 00:00:00", 1),
+            /Calendar event listing failed: 500/
+        );
+
+        globalThis.fetch = originalFetch;
+    });
+
+    test("annotates bookable_resource_name on listed events", async () => {
+        let resourceFetches = 0;
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async (url) => {
+            if (String(url).includes("bookable-resources")) {
+                resourceFetches++;
+                return {
+                    ok: true,
+                    text: async () => JSON.stringify({
+                        result: "success",
+                        data: [{ uuid: "res-uuid-1", name: "Salle Genève" }]
+                    })
+                };
+            }
+            if (String(url).includes("/profile")) {
+                return { ok: true, text: async () => JSON.stringify({ result: "success", data: { preferences: { timezone: { name: "Europe/Zurich" } } } }) };
+            }
+            return {
+                ok: true,
+                text: async () => JSON.stringify({
+                    result: "success",
+                    data: [
+                        { id: 1, title: "With room", bookable_resource_id: "res-uuid-1" },
+                        { id: 2, title: "Without room", bookable_resource_id: null },
+                    ]
+                })
+            };
+        };
+
+        try {
+            const client = new CalendarClient("mock-token");
+            const result = await client.listEvents("2025-01-01 00:00:00", "2025-01-02 00:00:00", "123");
+
+            assert.strictEqual(result.data[0].bookable_resource_name, "Salle Genève");
+            assert.strictEqual(result.data[1].bookable_resource_name, undefined);
+            assert.strictEqual(resourceFetches, 1);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test("skips resource lookup when no event books a resource", async () => {
+        let resourceFetches = 0;
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async (url) => {
+            if (String(url).includes("bookable-resources")) {
+                resourceFetches++;
+            }
+            if (String(url).includes("/profile")) {
+                return { ok: true, text: async () => JSON.stringify({ result: "success", data: { preferences: { timezone: { name: "Europe/Zurich" } } } }) };
+            }
+            return {
+                ok: true,
+                text: async () => JSON.stringify({
+                    result: "success",
+                    data: [{ id: 1, title: "Plain event", bookable_resource_id: null }]
+                })
+            };
+        };
+
+        try {
+            const client = new CalendarClient("mock-token");
+            await client.listEvents("2025-01-01 00:00:00", "2025-01-02 00:00:00", "123");
+
+            assert.strictEqual(resourceFetches, 0);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+});
+
+describe("CalendarClient.getEvent", () => {
+    function mockFetchRouting(eventData, resourcesData, calls) {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async (url) => {
+            calls.push(String(url));
+            if (String(url).includes("bookable-resources")) {
+                return {
+                    ok: true,
+                    text: async () => JSON.stringify({ result: "success", data: resourcesData ?? [] })
+                };
+            }
+            return {
+                ok: true,
+                text: async () => JSON.stringify({ result: "success", data: eventData })
+            };
+        };
+        return originalFetch;
+    }
+
+    test("calls the event endpoint and returns the event", async () => {
+        const calls = [];
+        const originalFetch = mockFetchRouting({ id: 42, title: "Standup" }, [], calls);
+
+        try {
+            const client = new CalendarClient("mock-token");
+            const result = await client.getEvent("42");
+
+            assert.strictEqual(result.data.title, "Standup");
+            assert.ok(calls[0].includes("/calendar/pim/event/42"), "URL contains event endpoint");
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test("adds bookable_resource_name when the event books a resource", async () => {
+        const calls = [];
+        const originalFetch = mockFetchRouting(
+            { id: 42, title: "Standup", bookable_resource_id: "res-uuid-1" },
+            [{ uuid: "res-uuid-1", name: "Salle Genève" }],
+            calls
+        );
+
+        try {
+            const client = new CalendarClient("mock-token");
+            const result = await client.getEvent("42");
+
+            assert.strictEqual(result.data.bookable_resource_name, "Salle Genève");
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test("leaves bookable_resource_name null when the resource is unknown", async () => {
+        const calls = [];
+        const originalFetch = mockFetchRouting(
+            { id: 42, title: "Standup", bookable_resource_id: "unknown-uuid" },
+            [],
+            calls
+        );
+
+        try {
+            const client = new CalendarClient("mock-token");
+            const result = await client.getEvent("42");
+
+            assert.strictEqual(result.data.bookable_resource_name, null);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test("skips resource lookup when the event books no resource", async () => {
+        const calls = [];
+        const originalFetch = mockFetchRouting({ id: 42, title: "Standup", bookable_resource_id: null }, [], calls);
+
+        try {
+            const client = new CalendarClient("mock-token");
+            await client.getEvent("42");
+
+            assert.strictEqual(calls.length, 1);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    test("throws on non-ok response", async () => {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async () => new Response(JSON.stringify({ result: "error", error: { code: "not_found", description: "x".repeat(500), secret: "TOKEN" } }), { status: 404 });
+
+        const client = new CalendarClient("mock-token");
+
+        await assert.rejects(
+            async () => client.getEvent("42"),
+            (error) => {
+                assert.match(error.message, /^Calendar event retrieval failed: 404 not_found: x+$/);
+                assert.ok(error.message.length < 260, "message is truncated");
+                assert.ok(!error.message.includes("TOKEN"));
+                return true;
+            }
+        );
+
+        globalThis.fetch = originalFetch;
+    });
+});
+
+describe("CalendarClient.createEvent", () => {
+    test("calls correct endpoint with body", async () => {
+        let capturedUrl = null;
+        let capturedBody = null;
+        let capturedMethod = null;
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async (url, options) => {
+            capturedUrl = url;
+            capturedBody = options?.body;
+            capturedMethod = options?.method;
+            return {
+                ok: true,
+                text: async () => JSON.stringify({ result: "success", data: { id: 42 } })
+            };
+        };
+
+        // Mock getDefaultCalendar and getUserProfile
+        const client = new CalendarClient("mock-token");
+        client.getDefaultCalendar = async () => ({ id: "1" });
+        client.getUserProfile = async () => ({
+            data: {
+                email: "test@example.com",
+                display_name: "Test User",
+                preferences: { timezone: { name: "Europe/Zurich" } }
+            }
+        });
+
+        const result = await client.createEvent({
+            title: "Test Event",
+            start: "2025-01-01 10:00:00",
+            end: "2025-01-01 11:00:00",
+            description: "Test description",
+        });
+
+        assert.strictEqual(result.data.id, 42);
+        assert.ok(capturedUrl.includes("/calendar/pim/event"), "URL contains event endpoint");
+        assert.strictEqual(capturedMethod, "POST", "Method is POST");
+        const body = JSON.parse(capturedBody);
+        assert.strictEqual(body.title, "Test Event");
+        assert.strictEqual(body.description, "Test description");
+        assert.strictEqual(body.freebusy, "busy");
+        assert.strictEqual(body.type, "event");
+
+        globalThis.fetch = originalFetch;
+    });
+
+    test("resolves contactId from the address book and notifies attendees", async () => {
+        let capturedBody = null;
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async (url, options) => {
+            capturedBody = options?.body;
+            return {
+                ok: true,
+                text: async () => JSON.stringify({ result: "success", data: { id: 42 } })
+            };
+        };
+
+        const client = new CalendarClient("mock-token");
+        client.getDefaultCalendar = async () => ({ id: "1" });
+        client.getUserProfile = async () => ({
+            data: {
+                email: "leopold.jacquot@gmail.com",
+                display_name: "Léo Jacquot",
+                preferences: { timezone: { name: "Europe/Zurich" } }
+            }
+        });
+        client.getContacts = async () => ({
+            result: "success",
+            data: [
+                { id: "r100424560", name: "leopold9974", emails: ["leopold9974@gmail.com"] },
+                { id: 95022716, name: "Léo Jacquot", emails: ["leopold.jacquot@gmail.com"] },
+            ]
+        });
+
+        try {
+            await client.createEvent({
+                title: "Test",
+                start: "2025-01-01 10:00:00",
+                end: "2025-01-01 11:00:00",
+                attendees: ["leopold9974@gmail.com", "unknown@example.com"],
+                notifyAttendees: true,
+            });
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+
+        const body = JSON.parse(capturedBody);
+        assert.strictEqual(body.notifyAttendees, true);
+        const byAddress = Object.fromEntries(body.attendees.map(a => [a.address, a]));
+        assert.strictEqual(byAddress["leopold9974@gmail.com"].contactId, "r100424560");
+        assert.strictEqual(byAddress["unknown@example.com"].contactId, undefined);
+        assert.strictEqual(byAddress["leopold.jacquot@gmail.com"].contactId, 95022716);
+        assert.strictEqual(byAddress["leopold.jacquot@gmail.com"].organizer, true);
+    });
+});
+
+describe("CalendarClient.updateEvent", () => {
+    const existingEvent = {
+        id: 42,
+        calendar_id: 1,
+        title: "Standup",
+        description: "Daily sync",
+        start: "2026-09-22 09:00:00",
+        end: "2026-09-22 09:15:00",
+        location: "Salle Nyon",
+        url: "https://meet.example.com/abc",
+        categories: ["work"],
+        color: "blue",
+        sequence: 3,
+        freebusy: "busy",
+        type: "event",
+        fullday: false,
+    };
+
+    function mockClient() {
+        const client = new CalendarClient("mock-token");
+        client.fetchEvent = async () => ({ result: "success", data: { ...existingEvent } });
+        client.getUserProfile = async () => ({
+            data: {
+                email: "test@example.com",
+                display_name: "Test User",
+                preferences: { timezone: { name: "Europe/Zurich" } }
+            }
+        });
+        return client;
+    }
+
+    async function captureUpdate(call) {
+        let capturedBody = null;
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async (url, options) => {
+            capturedBody = options?.body;
+            return {
+                ok: true,
+                text: async () => JSON.stringify({ result: "success", data: {} })
+            };
+        };
+
+        try {
+            await call();
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+
+        return JSON.parse(capturedBody);
+    }
+
+    test("preserves location and color when moving an event", async () => {
+        const body = await captureUpdate(() =>
+            mockClient().updateEvent("42", { start: "2026-09-22 10:00:00", end: "2026-09-22 10:15:00" })
+        );
+
+        assert.strictEqual(body.location, "Salle Nyon");
+        assert.strictEqual(body.color, "blue");
+    });
+
+    test("omits url, categories and sequence like the web app", async () => {
+        const body = await captureUpdate(() =>
+            mockClient().updateEvent("42", { title: "New title" })
+        );
+
+        assert.strictEqual(body.url, undefined);
+        assert.strictEqual(body.categories, undefined);
+        assert.strictEqual(body.sequence, undefined);
+    });
+
+    test("sends an empty location when the event has none", async () => {
+        const client = mockClient();
+        client.fetchEvent = async () => ({
+            result: "success",
+            data: { ...existingEvent, location: null },
+        });
+
+        const body = await captureUpdate(() =>
+            client.updateEvent("42", { title: "New title" })
+        );
+
+        assert.strictEqual(body.location, "");
+    });
+
+    test("sends notifyAttendees true and imip_request true when requested", async () => {
+        const body = await captureUpdate(() =>
+            mockClient().updateEvent("42", { title: "New title", notifyAttendees: true })
+        );
+
+        assert.strictEqual(body.notifyAttendees, true);
+        assert.strictEqual(body.imip_request, true);
+    });
+
+    test("keeps notifications off by default", async () => {
+        const body = await captureUpdate(() =>
+            mockClient().updateEvent("42", { title: "New title" })
+        );
+
+        assert.strictEqual(body.notifyAttendees, false);
+        assert.strictEqual(body.imip_request, false);
+    });
+});
+
+describe("CalendarClient.deleteEvent", () => {
+    async function captureDelete(call) {
+        let capturedUrl = null;
+        let capturedOptions = null;
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async (url, options) => {
+            capturedUrl = url;
+            capturedOptions = options;
+            return {
+                ok: true,
+                text: async () => JSON.stringify({ result: "success", data: {} })
+            };
+        };
+
+        try {
+            await call();
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+
+        return { capturedUrl, capturedOptions };
+    }
+
+    test("sends notification body when requested", async () => {
+        const { capturedUrl, capturedOptions } = await captureDelete(() =>
+            new CalendarClient("mock-token").deleteEvent("42", "7", true)
+        );
+
+        assert.ok(capturedUrl.includes("/calendar/pim/event/42"), "URL contains event endpoint");
+        assert.deepStrictEqual(JSON.parse(capturedOptions?.body), {
+            notifyAttendees: true,
+            imip_request: true,
+        });
+    });
+
+    test("sends no body by default", async () => {
+        const { capturedOptions } = await captureDelete(() =>
+            new CalendarClient("mock-token").deleteEvent("42", "7")
+        );
+
+        assert.strictEqual(capturedOptions?.body, undefined);
+    });
+});

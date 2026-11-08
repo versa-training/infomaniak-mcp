@@ -1,0 +1,33 @@
+{
+  "name": "infomaniak-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "One hosted MCP server for Infomaniak mail, calendar, kDrive, contacts, and kChat",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces && tsc",
+    "start": "node dist/index.js",
+    "test": "npm test --workspaces && tsc && node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "@infomaniak/mcp-server-calendar": "*",
+    "@infomaniak/mcp-server-contact": "*",
+    "@infomaniak/mcp-server-kchat": "*",
+    "@infomaniak/mcp-server-kdrive": "*",
+    "@infomaniak/mcp-server-mail": "*",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "name": "@infomaniak/mcp-server-calendar",
+  "version": "1.3.1",
+  "description": "MCP server for interacting with Infomaniak Calendar",
+  "license": "MIT",
+  "author": "Infonaniak (https://infomaniak.com)",
+  "homepage": "https://infomaniak.com",
+  "bugs": "https://github.com/infomaniak/mcp-server-calendar/issues",
+  "type": "module",
+  "bin": {
+    "mcp-server-calendar": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && node -e \"const fs=require('fs');for(const f of fs.readdirSync('dist'))if(f.endsWith('.js'))fs.chmodSync('dist/'+f,0o755)\"",
+    "prepare": "npm run build",
+    "watch": "tsc --watch",
+    "test": "npm run build && node --test tests/*.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^7.0.2"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/tools.d.ts",
+      "import": "./dist/tools.js"
+    }
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "peerDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32",
+    "zod": "^4"
+  }
+}

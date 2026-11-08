@@ -1,0 +1,45 @@
+{
+  "name": "@infomaniak/mcp-server-kdrive",
+  "version": "1.2.0",
+  "description": "MCP server for interacting with Infomaniak kDrive",
+  "license": "MIT",
+  "author": "Infomaniak (https://infomaniak.com)",
+  "homepage": "https://infomaniak.com",
+  "bugs": "https://github.com/infomaniak/mcp-server-kdrive/issues",
+  "type": "module",
+  "main": "dist/tools.js",
+  "types": "dist/tools.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/tools.d.ts",
+      "import": "./dist/tools.js"
+    }
+  },
+  "bin": {
+    "mcp-server-kdrive": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && node -e \"const fs=require('node:fs');for(const f of fs.readdirSync('dist')){if(f.endsWith('.js'))fs.chmodSync('dist/'+f,0o755)}\"",
+    "prepare": "npm run build",
+    "watch": "tsc --watch",
+    "test": "npm run build && node --test tests/*.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "peerDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32",
+    "zod": "^4"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^7.0.2"
+  }
+}
