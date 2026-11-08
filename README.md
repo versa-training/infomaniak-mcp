@@ -1,5 +1,7 @@
 <div align="center">
 
+# infomaniak-mcp
+
 **One MCP server for Infomaniak Mail, Calendar, kDrive, Contacts, and kChat. The operator picks the products; each user picks the tools. Powered by [versa](https://versa.training)**
 
 <a href="package.json"><img src="https://img.shields.io/badge/node-%E2%89%A522-blue?style=flat-square" alt="Node 22 or newer"></a>
