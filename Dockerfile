@@ -1,6 +1,6 @@
 # Build context: the repository root.
 #   docker build -t infomaniak-mcp .
-FROM node:22-slim AS build
+FROM node:22.23.4-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS build
 WORKDIR /srv
 COPY package.json package-lock.json tsconfig.json ./
 COPY packages packages
@@ -10,7 +10,7 @@ RUN for p in mail calendar kdrive contact kchat; do (cd packages/$p && npx tsc);
     && npx tsc \
     && npm prune --omit=dev --ignore-scripts
 
-FROM node:22-slim
+FROM node:22.23.4-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d
 WORKDIR /srv
 ENV HOST=0.0.0.0 PORT=8787 NODE_ENV=production
 COPY --from=build /srv/package.json /srv/package-lock.json ./
