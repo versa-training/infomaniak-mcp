@@ -61,7 +61,7 @@ export interface KchatClientOptions {
     channelCacheMs?: number;
 }
 
-const USERNAME_PATTERN = /^[a-z0-9._-]{1,64}$/;
+const USERNAME_PATTERN = /^(?=.*[a-z0-9_-])[a-z0-9._-]{1,64}$/;
 
 /** Strips a leading @, lowercases, and rejects anything that is not a kChat username. */
 export function normalizeUsername(username: string): string {

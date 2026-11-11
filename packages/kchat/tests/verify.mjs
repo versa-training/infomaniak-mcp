@@ -158,6 +158,27 @@ describe("KchatClient requests", () => {
         assert.strictEqual(f.calls.length, 0);
     });
 
+    test("getUserByUsername rejects dots-only names before any request", async () => {
+        const f = mockFetch({ body: {} });
+        for (const name of [".", "..", "..."]) {
+            await assert.rejects(make(f).getUserByUsername(name), /Invalid username/);
+        }
+        assert.strictEqual(f.calls.length, 0);
+    });
+
+    test("getUserByUsername accepts dotted, short, and 64-character names and rejects 65", async () => {
+        for (const name of ["a.b", "@Name", "a", "x".repeat(64)]) {
+            const clean = name.replace(/^@/, "").toLowerCase();
+            const f = mockFetch({ body: { id: "u1", username: clean } });
+            const user = await make(f).getUserByUsername(name);
+            assert.strictEqual(user.id, "u1");
+            assert.strictEqual(f.calls.length, 1);
+        }
+        const f = mockFetch({ body: {} });
+        await assert.rejects(make(f).getUserByUsername("x".repeat(65)), /Invalid username/);
+        assert.strictEqual(f.calls.length, 0);
+    });
+
     test("createDirectChannel posts the id pair as the body", async () => {
         const f = mockFetch({ body: { id: "dm" } });
         await make(f).createDirectChannel(["a", "b"]);
